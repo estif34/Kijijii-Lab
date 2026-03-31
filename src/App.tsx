@@ -43,8 +43,9 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactMarkdown from 'react-markdown';
+import Markdown from 'react-markdown';
 import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 
 export default function App() {
@@ -625,7 +626,7 @@ export default function App() {
                       </div>
                     )}
                     <div className="prose prose-stone max-w-none prose-p:leading-relaxed prose-p:mb-4 last:prose-p:mb-0">
-                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
+                      <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{msg.content}</Markdown>
                     </div>
                     {msg.role === 'assistant' && (
                       <div className="absolute -bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
@@ -816,9 +817,9 @@ export default function App() {
                         <div className="space-y-4">
                           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#006600]/60">Question {quizStep + 1} of {quizQuestions.length}</span>
                           <div className="text-2xl font-serif font-bold text-[#1a1a1a] leading-tight prose prose-stone max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                            <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
                               {quizQuestions[quizStep]?.question}
-                            </ReactMarkdown>
+                            </Markdown>
                           </div>
                         </div>
 
@@ -842,9 +843,9 @@ export default function App() {
                                 )}
                               >
                                 <div className="font-bold prose prose-stone max-w-none">
-                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
                                     {opt}
-                                  </ReactMarkdown>
+                                  </Markdown>
                                 </div>
                                 {showResult && isCorrect && <CheckCircle2 className="w-5 h-5" />}
                                 {showResult && isSelected && !isCorrect && <AlertCircle className="w-5 h-5" />}
@@ -862,9 +863,9 @@ export default function App() {
                           >
                             <div className="text-sm italic text-[#1a1a1a]/70 prose prose-stone max-w-none">
                               <span className="font-bold not-italic block mb-1 text-[#006600]">Mwalimu's Explanation:</span>
-                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                              <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
                                 {quizQuestions[quizStep].explanation}
-                              </ReactMarkdown>
+                              </Markdown>
                             </div>
                           </motion.div>
                         )}

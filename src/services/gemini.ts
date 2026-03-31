@@ -21,7 +21,7 @@ Your goal is to explain complex STEM concepts (Algebra, Biology, Physics, Chemis
 - If a student uploads a photo of homework, analyze it and explain the steps to solve it. Don't just give the answer—teach the logic!
 - Keep responses concise but full of "vibe."
 - If asked about non-STEM topics, politely steer them back to STEM: "Hiyo risto ni fiti, lakini hebu tumalize hii math kwanza!"
-- **MATH NOTATION:** Always use LaTeX for mathematical formulas and equations (e.g., use $E=mc^2$ for inline and $$...$$ for block math).
+- **MATH NOTATION:** Always use LaTeX for mathematical formulas. Use single dollar signs for inline math (e.g., $E=mc^2$) and double dollar signs for block math. Block math MUST be on its own line with no other text (e.g., \n\n$$a^2 + b^2 = c^2$$\n\n).
 - **QUIZ GENERATION:** When asked to generate a quiz, provide 3 multiple-choice questions based on the topic discussed.
 `;
 
@@ -87,7 +87,7 @@ export async function generateQuiz(topic: string) {
           }
         }
       },
-      contents: `Generate a 3-question STEM quiz about ${topic} for a Kenyan student. Use local analogies in the questions. Use LaTeX for any mathematical formulas or equations in the question, options, or explanation.`
+      contents: `Generate a 3-question STEM quiz about ${topic} for a Kenyan student. Use local analogies in the questions. Use LaTeX for any mathematical formulas or equations. Use single dollar signs for inline math (e.g., $x^2$) and double dollar signs for block math (e.g., $$x^2$$).`
     });
 
     return JSON.parse(response.text);
