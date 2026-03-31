@@ -67,7 +67,9 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'name', 'email']) &&
              data.uid is string && data.uid.size() > 0 &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             isValidEmail(data.email);
+             isValidEmail(data.email) &&
+             (!('points' in data) || data.points is number) &&
+             (!('gradeLevel' in data) || data.gradeLevel in ['Primary', 'Secondary', 'University']);
     }
     
     function isValidChat(data) {

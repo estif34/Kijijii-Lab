@@ -40,7 +40,9 @@ import {
   Loader2,
   X,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Github,
+  Twitter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
@@ -76,10 +78,19 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   const filteredChats = chats.filter(chat => 
     chat.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  if (activeChat && (activeChat as any).isNew && activeChat.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+    if (!filteredChats.find(c => c.id === activeChat.id)) {
+      filteredChats.unshift(activeChat);
+    }
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -182,21 +193,32 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  const createNewChat = async () => {
+  const createNewChat = (initialPrompt?: string) => {
     if (!user) return;
-    const newChat = {
+    const newChat: any = {
+      id: 'new-' + Date.now(),
       userId: user.uid,
-      title: 'New STEM Risto',
-      lastMessageAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
+      title: initialPrompt ? initialPrompt.slice(0, 30) + '...' : 'New STEM Risto',
+      lastMessageAt: new Date(),
+      createdAt: new Date(),
+      isNew: true
     };
-    try {
-      const docRef = await addDoc(collection(db, 'chats'), newChat);
-      setActiveChat({ id: docRef.id, ...newChat } as ChatSession);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'chats');
+    setActiveChat(newChat);
+    setMessages([]);
+    if (initialPrompt) {
+      setPendingPrompt(initialPrompt);
     }
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
   };
+
+  useEffect(() => {
+    if (activeChat && (activeChat as any).isNew && pendingPrompt && user) {
+      sendMessage(undefined, pendingPrompt);
+      setPendingPrompt(null);
+    }
+  }, [activeChat, pendingPrompt, user]);
 
   const sendMessage = async (e?: React.FormEvent, customText?: string, image?: string) => {
     e?.preventDefault();
@@ -216,8 +238,25 @@ export default function App() {
     setUploadedImage(null);
 
     try {
+      let chatId = activeChat.id;
+      let currentActiveChat = activeChat;
+
+      // Create chat document if it's a new chat
+      if ((activeChat as any).isNew) {
+        const newChatData = {
+          userId: user.uid,
+          title: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
+          lastMessageAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        };
+        const docRef = await addDoc(collection(db, 'chats'), newChatData);
+        chatId = docRef.id;
+        currentActiveChat = { id: chatId, ...newChatData } as ChatSession;
+        setActiveChat(currentActiveChat);
+      }
+
       const userMsg: any = {
-        chatId: activeChat.id,
+        chatId: chatId,
         role: 'user' as const,
         content: text,
         createdAt: serverTimestamp(),
@@ -228,47 +267,51 @@ export default function App() {
       }
 
       try {
-        await addDoc(collection(db, 'chats', activeChat.id, 'messages'), userMsg);
+        await addDoc(collection(db, 'chats', chatId, 'messages'), userMsg);
       } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `chats/${activeChat.id}/messages`);
+        handleFirestoreError(error, OperationType.CREATE, `chats/${chatId}/messages`);
       }
 
-      // Update chat title if it's the first message
-      if (messages.length === 0) {
-        const newTitle = text.slice(0, 30) + '...';
+      // Update chat title if it's the first message (and not already set by creation)
+      if (messages.length === 0 && !(activeChat as any).isNew) {
+        const newTitle = text.slice(0, 30) + (text.length > 30 ? '...' : '');
         try {
-          await setDoc(doc(db, 'chats', activeChat.id), { title: newTitle }, { merge: true });
-          setActiveChat({ ...activeChat, title: newTitle });
+          await setDoc(doc(db, 'chats', chatId), { title: newTitle }, { merge: true });
+          setActiveChat({ ...currentActiveChat, title: newTitle });
         } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `chats/${activeChat.id}`);
+          handleFirestoreError(error, OperationType.UPDATE, `chats/${chatId}`);
         }
       }
 
       // Filter out the message we just added if it already appeared in the messages state
       // to avoid sending it twice to Gemini
       const history = messages
-        .filter(m => m.content !== text || m.role !== 'user')
         .map(m => ({ role: m.role, content: m.content }));
+      
+      // If the last message in history is the one we just sent, remove it to avoid duplication in prompt
+      if (history.length > 0 && history[history.length - 1].content === text && history[history.length - 1].role === 'user') {
+        history.pop();
+      }
         
       const response = await getTutorResponse(text, history, finalImage);
 
       const assistantMsg = {
-        chatId: activeChat.id,
+        chatId: chatId,
         role: 'assistant' as const,
         content: response,
         createdAt: serverTimestamp(),
       };
       
       try {
-        await addDoc(collection(db, 'chats', activeChat.id, 'messages'), assistantMsg);
+        await addDoc(collection(db, 'chats', chatId, 'messages'), assistantMsg);
       } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `chats/${activeChat.id}/messages`);
+        handleFirestoreError(error, OperationType.CREATE, `chats/${chatId}/messages`);
       }
       
       try {
-        await setDoc(doc(db, 'chats', activeChat.id), { lastMessageAt: serverTimestamp() }, { merge: true });
+        await setDoc(doc(db, 'chats', chatId), { lastMessageAt: serverTimestamp() }, { merge: true });
       } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `chats/${activeChat.id}`);
+        handleFirestoreError(error, OperationType.UPDATE, `chats/${chatId}`);
       }
     } catch (error: any) {
       console.error('Failed to send message', error);
@@ -372,8 +415,8 @@ export default function App() {
           <div className="w-20 h-20 bg-[#006600] rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
             <Brain className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-4xl font-serif font-bold text-[#1a1a1a] mb-4">Kijiji Lab</h1>
-          <p className="text-[#1a1a1a]/70 mb-8 font-serif italic">
+          <h1 className="text-4xl font-sans font-bold text-[#1a1a1a] mb-4">Kijiji Lab</h1>
+          <p className="text-[#1a1a1a]/70 mb-8 font-sans italic">
             "Sema msee! Karibu kwa Kijiji Lab. Let's master STEM together using local ristos."
           </p>
 
@@ -464,19 +507,19 @@ export default function App() {
     <div className="h-screen w-full flex bg-[#f5f5f0] overflow-hidden font-sans">
       {/* Sidebar */}
       <aside className="w-80 bg-white border-r border-[#006600]/10 flex flex-col hidden md:flex">
-        <div className="p-6 border-bottom border-[#006600]/10">
+        <div className="p-6 border-b border-[#006600]/10">
           <div className="flex items-center gap-3 mb-8 group cursor-pointer">
             <div className="w-12 h-12 bg-[#006600] rounded-[18px] flex items-center justify-center shadow-lg group-hover:rotate-6 transition-transform">
               <Brain className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-serif font-bold text-[#1a1a1a] leading-none">Kijiji Lab</h1>
+              <h1 className="text-2xl font-sans font-bold text-[#1a1a1a] leading-none">Kijiji Lab</h1>
               <p className="text-[10px] text-[#006600]/60 uppercase tracking-[0.2em] font-bold mt-1">STEM Tutor</p>
             </div>
           </div>
           
           <button 
-            onClick={createNewChat}
+            onClick={() => createNewChat()}
             className="w-full bg-[#BB0000] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-[#990000] transition-all hover:shadow-xl active:scale-95 mb-6"
           >
             <Plus className="w-5 h-5" />
@@ -559,6 +602,28 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Sidebar Footer */}
+        <div className="p-6 mt-auto border-t border-[#006600]/10 bg-[#f5f5f0]/30">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex gap-3">
+              <a href="#" className="w-8 h-8 rounded-full bg-[#006600]/5 flex items-center justify-center text-[#006600]/40 hover:bg-[#006600] hover:text-white transition-all">
+                <Github className="w-4 h-4" />
+              </a>
+              <a href="#" className="w-8 h-8 rounded-full bg-[#006600]/5 flex items-center justify-center text-[#006600]/40 hover:bg-[#006600] hover:text-white transition-all">
+                <Twitter className="w-4 h-4" />
+              </a>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-[#006600] animate-pulse" />
+              <span className="text-[10px] font-bold text-[#006600]/40 uppercase tracking-widest">System Online</span>
+            </div>
+          </div>
+          <p className="text-[9px] text-[#006600]/30 font-medium uppercase tracking-[0.2em] leading-relaxed">
+            © 2026 Kijiji Lab • Nairobi, Kenya<br />
+            Empowering STEM through AI
+          </p>
+        </div>
       </aside>
 
       {/* Main Content */}
@@ -572,7 +637,7 @@ export default function App() {
                   <Brain className="w-8 h-8 text-[#006600]" />
                 </div>
                 <div>
-                  <h2 className="font-serif font-bold text-[#1a1a1a]">{activeChat.title}</h2>
+                  <h2 className="font-sans font-bold text-[#1a1a1a]">{activeChat.title}</h2>
                   <p className="text-xs text-[#006600]/60 italic">Chatting with Mwalimu AI</p>
                 </div>
               </div>
@@ -693,6 +758,7 @@ export default function App() {
                     <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                   </label>
                   <input
+                    ref={inputRef}
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
@@ -708,6 +774,11 @@ export default function App() {
                   </button>
                 </div>
               </form>
+              <div className="mt-4 text-center">
+                <p className="text-[9px] text-[#006600]/30 font-bold uppercase tracking-[0.4em]">
+                  Mwalimu AI can make mistakes • Double check the risto
+                </p>
+              </div>
             </div>
           </>
         ) : (
@@ -720,8 +791,8 @@ export default function App() {
               <div className="w-24 h-24 bg-white rounded-[32px] flex items-center justify-center mx-auto mb-8 shadow-xl border border-[#006600]/10 rotate-3 animate-slam-in">
                 <BookOpen className="w-12 h-12 text-[#006600]" />
               </div>
-              <h2 className="text-4xl font-serif font-bold text-[#1a1a1a] mb-4">Sema, {user.name.split(' ')[0]}!</h2>
-              <p className="text-lg text-[#1a1a1a]/60 mb-12 font-serif italic max-w-md mx-auto">
+              <h2 className="text-4xl font-sans font-bold text-[#1a1a1a] mb-4">Sema, {user.name.split(' ')[0]}!</h2>
+              <p className="text-lg text-[#1a1a1a]/60 mb-12 font-sans italic max-w-md mx-auto">
                 "Ready to master <span className="text-[#BB0000] font-bold">STEM</span> with some local ristos? Pick a topic below or start a new risto."
               </p>
               
@@ -738,9 +809,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.1 }}
                     onClick={() => {
-                      createNewChat().then(() => {
-                        // In a real app we'd send the first message here
-                      });
+                      createNewChat(`Niaje Mwalimu! Nataka kujua zaidi kuhusu ${topic.title}: ${topic.desc}`);
                     }}
                     className="bg-white p-6 rounded-[32px] border border-[#006600]/10 text-left hover:shadow-xl hover:-translate-y-1 transition-all group"
                   >
@@ -754,12 +823,56 @@ export default function App() {
               </div>
 
               <button 
-                onClick={createNewChat}
+                onClick={() => createNewChat()}
                 className="bg-[#BB0000] text-white px-10 py-5 rounded-full font-bold hover:bg-[#990000] transition-all hover:scale-105 shadow-xl flex items-center gap-3 mx-auto active:scale-95"
               >
                 <Plus className="w-6 h-6" />
                 Anzisha Risto Mpya
               </button>
+
+              <footer className="mt-24 pt-16 border-t border-[#006600]/10 max-w-4xl mx-auto w-full">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-12 text-left mb-16">
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-[#006600]/40 uppercase tracking-[0.3em]">The Mission</h4>
+                    <p className="text-sm text-[#1a1a1a]/60 leading-relaxed font-serif italic">
+                      "Bridging the gap in STEM education through culturally relatable AI tutoring for every Kenyan student."
+                    </p>
+                  </div>
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-[#006600]/40 uppercase tracking-[0.3em]">Quick Links</h4>
+                    <div className="flex flex-col gap-2">
+                      <a href="#" className="text-xs font-bold text-[#1a1a1a] hover:text-[#BB0000] transition-colors">About Kijiji Lab</a>
+                      <a href="#" className="text-xs font-bold text-[#1a1a1a] hover:text-[#BB0000] transition-colors">STEM Curriculum</a>
+                      <a href="#" className="text-xs font-bold text-[#1a1a1a] hover:text-[#BB0000] transition-colors">Privacy & Terms</a>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-[#006600]/40 uppercase tracking-[0.3em]">Status</h4>
+                    <div className="flex items-center gap-3 p-3 bg-[#006600]/5 rounded-2xl border border-[#006600]/10">
+                      <div className="w-2 h-2 rounded-full bg-[#006600] animate-pulse" />
+                      <span className="text-[10px] font-bold text-[#006600] uppercase tracking-widest">Mwalimu AI Online</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col md:flex-row items-center justify-between gap-8 pt-8 border-t border-[#006600]/5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-[#006600] rounded-lg flex items-center justify-center">
+                      <Brain className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="text-sm font-bold text-[#1a1a1a]">Kijiji Lab</span>
+                  </div>
+                  
+                  <p className="text-[10px] text-[#006600]/30 font-medium uppercase tracking-[0.3em]">
+                    Made with <span className="text-[#BB0000]">❤️</span> in Nairobi • © 2026
+                  </p>
+                  
+                  <div className="flex gap-4">
+                    <a href="#" className="text-[#006600]/40 hover:text-[#006600] transition-colors"><Github className="w-4 h-4" /></a>
+                    <a href="#" className="text-[#006600]/40 hover:text-[#006600] transition-colors"><Twitter className="w-4 h-4" /></a>
+                  </div>
+                </div>
+              </footer>
             </motion.div>
           </div>
         )}

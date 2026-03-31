@@ -40,6 +40,7 @@ export async function getTutorResponse(prompt: string, history: any[] = [], imag
           parts: [{ text: h.content }]
         })),
         {
+          role: 'user',
           parts: [
             ...(imageBase64 && imageBase64.includes(',') ? [{ inlineData: { data: imageBase64.split(',')[1], mimeType: "image/jpeg" } }] : []),
             { text: prompt }
