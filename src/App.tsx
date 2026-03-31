@@ -18,7 +18,10 @@ import {
   where,
   orderBy,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  getDocFromServer,
+  handleFirestoreError,
+  OperationType
 } from './firebase';
 import { UserProfile, ChatSession, Message, QuizQuestion } from './types';
 import { getTutorResponse, generateQuiz } from './services/gemini';
@@ -41,6 +44,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -112,6 +117,8 @@ export default function App() {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const chatList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));
         setChats(chatList);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'chats');
       });
       return () => unsubscribe();
     }
@@ -126,6 +133,8 @@ export default function App() {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const msgList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
         setMessages(msgList);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, `chats/${activeChat.id}/messages`);
       });
       return () => unsubscribe();
     } else {
@@ -180,22 +189,32 @@ export default function App() {
       lastMessageAt: serverTimestamp(),
       createdAt: serverTimestamp(),
     };
-    const docRef = await addDoc(collection(db, 'chats'), newChat);
-    setActiveChat({ id: docRef.id, ...newChat } as ChatSession);
+    try {
+      const docRef = await addDoc(collection(db, 'chats'), newChat);
+      setActiveChat({ id: docRef.id, ...newChat } as ChatSession);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'chats');
+    }
   };
 
   const sendMessage = async (e?: React.FormEvent, customText?: string, image?: string) => {
     e?.preventDefault();
     const text = customText || inputText;
     const finalImage = image || uploadedImage;
+    
     if ((!text.trim() && !finalImage) || isSending || !user || !activeChat) return;
 
     setIsSending(true);
+    setErrorMessage(null);
+    
+    // Store values for potential retry before clearing
+    const currentInput = inputText;
+    const currentImage = uploadedImage;
+    
     setInputText('');
     setUploadedImage(null);
 
     try {
-      setErrorMessage(null);
       const userMsg: any = {
         chatId: activeChat.id,
         role: 'user' as const,
@@ -207,14 +226,29 @@ export default function App() {
         userMsg.imageUrl = finalImage;
       }
 
-      await addDoc(collection(db, 'chats', activeChat.id, 'messages'), userMsg);
+      try {
+        await addDoc(collection(db, 'chats', activeChat.id, 'messages'), userMsg);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, `chats/${activeChat.id}/messages`);
+      }
 
       // Update chat title if it's the first message
       if (messages.length === 0) {
-        await setDoc(doc(db, 'chats', activeChat.id), { title: text.slice(0, 30) + '...' }, { merge: true });
+        const newTitle = text.slice(0, 30) + '...';
+        try {
+          await setDoc(doc(db, 'chats', activeChat.id), { title: newTitle }, { merge: true });
+          setActiveChat({ ...activeChat, title: newTitle });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `chats/${activeChat.id}`);
+        }
       }
 
-      const history = messages.map(m => ({ role: m.role, content: m.content }));
+      // Filter out the message we just added if it already appeared in the messages state
+      // to avoid sending it twice to Gemini
+      const history = messages
+        .filter(m => m.content !== text || m.role !== 'user')
+        .map(m => ({ role: m.role, content: m.content }));
+        
       const response = await getTutorResponse(text, history, finalImage);
 
       const assistantMsg = {
@@ -223,12 +257,34 @@ export default function App() {
         content: response,
         createdAt: serverTimestamp(),
       };
-      await addDoc(collection(db, 'chats', activeChat.id, 'messages'), assistantMsg);
       
-      await setDoc(doc(db, 'chats', activeChat.id), { lastMessageAt: serverTimestamp() }, { merge: true });
+      try {
+        await addDoc(collection(db, 'chats', activeChat.id, 'messages'), assistantMsg);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, `chats/${activeChat.id}/messages`);
+      }
+      
+      try {
+        await setDoc(doc(db, 'chats', activeChat.id), { lastMessageAt: serverTimestamp() }, { merge: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `chats/${activeChat.id}`);
+      }
     } catch (error: any) {
       console.error('Failed to send message', error);
-      setErrorMessage(error.message || "Sema msee, something went wrong. Tafadhali jaribu tena.");
+      // Restore input on failure
+      setInputText(currentInput);
+      setUploadedImage(currentImage);
+      
+      let displayError = "Sema msee, something went wrong. Tafadhali jaribu tena.";
+      try {
+        const parsedError = JSON.parse(error.message);
+        if (parsedError.error.includes('insufficient permissions')) {
+          displayError = "Access denied. Please check your permissions or try logging in again.";
+        }
+      } catch {
+        displayError = error.message || displayError;
+      }
+      setErrorMessage(displayError);
     } finally {
       setIsSending(false);
     }
@@ -569,7 +625,7 @@ export default function App() {
                       </div>
                     )}
                     <div className="prose prose-stone max-w-none prose-p:leading-relaxed prose-p:mb-4 last:prose-p:mb-0">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
                     </div>
                     {msg.role === 'assistant' && (
                       <div className="absolute -bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
@@ -759,9 +815,11 @@ export default function App() {
                       >
                         <div className="space-y-4">
                           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#006600]/60">Question {quizStep + 1} of {quizQuestions.length}</span>
-                          <p className="text-2xl font-serif font-bold text-[#1a1a1a] leading-tight">
-                            {quizQuestions[quizStep]?.question}
-                          </p>
+                          <div className="text-2xl font-serif font-bold text-[#1a1a1a] leading-tight prose prose-stone max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                              {quizQuestions[quizStep]?.question}
+                            </ReactMarkdown>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3">
@@ -783,7 +841,11 @@ export default function App() {
                                   showResult && !isSelected && !isCorrect && "border-[#006600]/5 opacity-50"
                                 )}
                               >
-                                <span className="font-bold">{opt}</span>
+                                <div className="font-bold prose prose-stone max-w-none">
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    {opt}
+                                  </ReactMarkdown>
+                                </div>
                                 {showResult && isCorrect && <CheckCircle2 className="w-5 h-5" />}
                                 {showResult && isSelected && !isCorrect && <AlertCircle className="w-5 h-5" />}
                                 {!showResult && <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />}
@@ -798,10 +860,12 @@ export default function App() {
                             animate={{ opacity: 1, y: 0 }}
                             className="p-6 bg-[#f5f5f0] rounded-[24px] border border-[#006600]/10"
                           >
-                            <p className="text-sm italic text-[#1a1a1a]/70">
+                            <div className="text-sm italic text-[#1a1a1a]/70 prose prose-stone max-w-none">
                               <span className="font-bold not-italic block mb-1 text-[#006600]">Mwalimu's Explanation:</span>
-                              {quizQuestions[quizStep].explanation}
-                            </p>
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {quizQuestions[quizStep].explanation}
+                              </ReactMarkdown>
+                            </div>
                           </motion.div>
                         )}
                       </motion.div>

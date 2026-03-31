@@ -21,12 +21,17 @@ Your goal is to explain complex STEM concepts (Algebra, Biology, Physics, Chemis
 - If a student uploads a photo of homework, analyze it and explain the steps to solve it. Don't just give the answer—teach the logic!
 - Keep responses concise but full of "vibe."
 - If asked about non-STEM topics, politely steer them back to STEM: "Hiyo risto ni fiti, lakini hebu tumalize hii math kwanza!"
+- **MATH NOTATION:** Always use LaTeX for mathematical formulas and equations (e.g., use $E=mc^2$ for inline and $$...$$ for block math).
 - **QUIZ GENERATION:** When asked to generate a quiz, provide 3 multiple-choice questions based on the topic discussed.
 `;
 
 export async function getTutorResponse(prompt: string, history: any[] = [], imageBase64?: string) {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in your environment.");
+    }
+    const ai = new GoogleGenAI({ apiKey });
     const model = ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: [
@@ -43,7 +48,6 @@ export async function getTutorResponse(prompt: string, history: any[] = [], imag
       ],
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
       }
     });
 
@@ -60,7 +64,11 @@ export async function getTutorResponse(prompt: string, history: any[] = [], imag
 
 export async function generateQuiz(topic: string) {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in your environment.");
+    }
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       config: {
@@ -79,7 +87,7 @@ export async function generateQuiz(topic: string) {
           }
         }
       },
-      contents: `Generate a 3-question STEM quiz about ${topic} for a Kenyan student. Use local analogies in the questions.`
+      contents: `Generate a 3-question STEM quiz about ${topic} for a Kenyan student. Use local analogies in the questions. Use LaTeX for any mathematical formulas or equations in the question, options, or explanation.`
     });
 
     return JSON.parse(response.text);

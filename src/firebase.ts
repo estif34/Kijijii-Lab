@@ -101,5 +101,6 @@ export {
   orderBy, 
   onSnapshot, 
   addDoc, 
-  serverTimestamp 
+  serverTimestamp,
+  getDocFromServer
 };
