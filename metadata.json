@@ -1,0 +1,5 @@
+{
+  "name": "Kijiji Lab",
+  "description": "AI STEM Tutor for Kenyan Students. Localized analogies, Swahili/Sheng code-switching, and homework photo help.",
+  "requestFramePermissions": ["camera"]
+}
