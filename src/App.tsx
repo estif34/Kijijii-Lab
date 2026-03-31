@@ -687,7 +687,7 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <div className="flex items-center gap-4 bg-white p-2 rounded-full shadow-lg border border-[#5A5A40]/10 pr-4">
+                <div className="flex items-center gap-4 bg-white p-2 rounded-full shadow-lg border-none pr-4">
                   <label className="p-3 hover:bg-[#f5f5f0] rounded-full cursor-pointer transition-colors text-[#006600]">
                     <Camera className="w-6 h-6" />
                     <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
@@ -697,7 +697,7 @@ export default function App() {
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     placeholder="Uliza swali yako hapa..."
-                    className="flex-1 bg-transparent border-none focus:ring-0 text-[#1a1a1a] placeholder-[#006600]/40 py-4"
+                    className="flex-1 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-[#1a1a1a] placeholder-[#006600]/40 py-4"
                   />
                   <button
                     type="submit"
